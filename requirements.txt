@@ -1,0 +1,12 @@
+aiogram==3.4.1
+sqlalchemy==2.0.23
+python-dotenv==1.0.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+openai>=1.0.0
+pandas>=2.0.0
+openpyxl>=3.0.0
+alembic>=1.12.0
+python-multipart>=0.0.6
+# Для PostgreSQL (опционально, раскомментируй если нужна):
+# psycopg2-binary==2.9.9
