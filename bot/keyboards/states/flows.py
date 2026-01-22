@@ -44,7 +44,4 @@ class SettingsState(StatesGroup):
     viewing_settings = State()  # Просмотр настроек
     changing_role = State()  # Изменение роли
     editing_profile = State()  # Редактирование профиля
-class ProjectReportState(StatesGroup):
-    """Состояния запроса отчёта по проекту."""
-    choosing_project = State()  # Выбор проекта
 

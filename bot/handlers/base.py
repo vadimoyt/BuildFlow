@@ -27,7 +27,8 @@ from bot.utils import (
     format_price, format_datetime, format_project_report,
     format_expense_summary, format_transaction_category,
     format_project_stage, is_valid_amount, is_valid_project_name,
-    is_valid_project_address, format_expense_entry, format_project_settings
+    is_valid_project_address, format_expense_entry, format_project_settings,
+    format_date
 )
 from database.session import SessionLocal
 from database.models import User, UserRole, TransactionCategory, ProjectStage
@@ -210,7 +211,7 @@ async def cb_my_projects(callback: CallbackQuery, state: FSMContext) -> None:
 
 # ============ ВЫБОР ПРОЕКТА ИЗ СПИСКА - ИСПРАВЛЕННЫЙ ============
 
-@router.callback_query(ProjectManagementState.choosing_project, F.data.startswith("proj_"))
+@router.callback_query(ProjectManagementState.choosing_project, F.data.startswith("proj_"), ~F.data.startswith("proj_details_"), ~F.data.startswith("proj_add_"), ~F.data.startswith("proj_report_"))
 async def cb_project_list_select(callback: CallbackQuery, state: FSMContext) -> None:
     """Выбор проекта из списка - ПРАВИЛЬНАЯ ОБРАБОТКА."""
     # Парсим: callback_data = "proj_5"
@@ -244,6 +245,116 @@ async def cb_project_list_select(callback: CallbackQuery, state: FSMContext) -> 
     except Exception as exc:
         logger.exception(f"Ошибка при загрузке проекта: {exc}")
         await callback.answer("❌ Ошибка при загрузке проекта", show_alert=True)
+    finally:
+        session.close()
+    
+    await callback.answer()
+
+
+# ============ ДЕЙСТВИЯ С ПРОЕКТОМ ============
+
+@router.callback_query(F.data.startswith("proj_details_"))
+async def cb_proj_details_from_actions(callback: CallbackQuery, state: FSMContext) -> None:
+    """Открыть детали проекта из меню действий."""
+    project_id_str = callback.data.replace("proj_details_", "")
+    
+    if not project_id_str.isdigit():
+        await callback.answer("❌ Ошибка обработки ID", show_alert=True)
+        return
+    
+    project_id = int(project_id_str)
+    session = get_db_session()
+    
+    try:
+        report = crud.get_project_report(session, project_id)
+        
+        if report:
+            await callback.message.edit_text(
+                format_project_report(report),
+                reply_markup=project_details_kb(project_id),
+                parse_mode="HTML"
+            )
+        else:
+            await callback.answer("❌ Проект не найден", show_alert=True)
+    except Exception as exc:
+        logger.exception(f"Ошибка при загрузке деталей: {exc}")
+        await callback.answer("❌ Ошибка при загрузке", show_alert=True)
+    finally:
+        session.close()
+    
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("proj_add_expense_"))
+async def cb_proj_add_expense_from_actions(callback: CallbackQuery, state: FSMContext) -> None:
+    """Добавить расход для выбранного проекта."""
+    project_id_str = callback.data.replace("proj_add_expense_", "")
+    
+    if not project_id_str.isdigit():
+        await callback.answer("❌ Ошибка обработки ID", show_alert=True)
+        return
+    
+    project_id = int(project_id_str)
+    
+    await state.set_state(AddExpenseState.choosing_project)
+    await state.update_data(selected_project_id=project_id)
+    await state.set_state(AddExpenseState.entering_amount)
+    
+    await callback.message.edit_text(
+        "💰 <b>Введите сумму расхода:</b>\n\n"
+        "Пример: 250.50 или 250",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("proj_add_photo_"))
+async def cb_proj_add_photo_from_actions(callback: CallbackQuery, state: FSMContext) -> None:
+    """Загрузить фото для выбранного проекта."""
+    project_id_str = callback.data.replace("proj_add_photo_", "")
+    
+    if not project_id_str.isdigit():
+        await callback.answer("❌ Ошибка обработки ID", show_alert=True)
+        return
+    
+    project_id = int(project_id_str)
+    
+    await state.set_state(PhotoReportState.choosing_project)
+    await state.update_data(selected_project_id=project_id)
+    await state.set_state(PhotoReportState.choosing_stage)
+    
+    await callback.message.edit_text(
+        "📸 <b>Выберите этап работ:</b>",
+        reply_markup=project_stage_kb(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("proj_report_"))
+async def cb_proj_report_from_actions(callback: CallbackQuery, state: FSMContext) -> None:
+    """Показать отчёт по выбранному проекту."""
+    project_id_str = callback.data.replace("proj_report_", "")
+    
+    if not project_id_str.isdigit():
+        await callback.answer("❌ Ошибка обработки ID", show_alert=True)
+        return
+    
+    project_id = int(project_id_str)
+    session = get_db_session()
+    
+    try:
+        report = crud.get_project_report(session, project_id)
+        
+        if report:
+            await callback.message.edit_text(
+                format_project_report(report),
+                reply_markup=back_to_menu_kb(),
+                parse_mode="HTML"
+            )
+        else:
+            await callback.answer("❌ Проект не найден", show_alert=True)
+    except Exception as exc:
+        logger.exception(f"Ошибка при загрузке отчета: {exc}")
+        await callback.answer("❌ Ошибка при загрузке", show_alert=True)
     finally:
         session.close()
     
@@ -405,7 +516,7 @@ async def cb_add_expense_start(callback: CallbackQuery, state: FSMContext) -> No
     await callback.answer()
 
 
-@router.callback_query(AddExpenseState.choosing_project, F.data.startswith("proj_"))
+@router.callback_query(AddExpenseState.choosing_project, F.data.startswith("proj_"), ~F.data.startswith("proj_details_"), ~F.data.startswith("proj_add_"), ~F.data.startswith("proj_report_"))
 async def cb_expense_project_selected(callback: CallbackQuery, state: FSMContext) -> None:
     """Проект выбран для добавления расхода."""
     project_id_str = callback.data.replace("proj_", "")
@@ -579,7 +690,7 @@ async def cb_photo_report_start(callback: CallbackQuery, state: FSMContext) -> N
     await callback.answer()
 
 
-@router.callback_query(PhotoReportState.choosing_project, F.data.startswith("proj_"))
+@router.callback_query(PhotoReportState.choosing_project, F.data.startswith("proj_"), ~F.data.startswith("proj_details_"), ~F.data.startswith("proj_add_"), ~F.data.startswith("proj_report_"))
 async def cb_photo_project_selected(callback: CallbackQuery, state: FSMContext) -> None:
     """Проект выбран для фото отчёта."""
     project_id_str = callback.data.replace("proj_", "")
@@ -714,7 +825,7 @@ async def cb_project_report_start(callback: CallbackQuery, state: FSMContext) ->
     await callback.answer()
 
 
-@router.callback_query(ProjectReportState.choosing_project, F.data.startswith("proj_"))
+@router.callback_query(ProjectReportState.choosing_project, F.data.startswith("proj_"), ~F.data.startswith("proj_details_"), ~F.data.startswith("proj_add_"), ~F.data.startswith("proj_report_"))
 async def cb_report_project_selected(callback: CallbackQuery, state: FSMContext) -> None:
     """Проект выбран для отчёта."""
     project_id_str = callback.data.replace("proj_", "")
@@ -743,40 +854,6 @@ async def cb_report_project_selected(callback: CallbackQuery, state: FSMContext)
     except Exception as exc:
         logger.exception(f"Ошибка при получении отчёта: {exc}")
         await callback.answer("❌ Ошибка при загрузке отчёта", show_alert=True)
-    finally:
-        session.close()
-    
-    await callback.answer()
-
-
-# ============ ДЕТАЛИ ПРОЕКТА С РАСШИРЕННОЙ СТАТИСТИКОЙ ============
-
-@router.callback_query(F.data.startswith("proj_details_"))
-async def cb_proj_details(callback: CallbackQuery, state: FSMContext) -> None:
-    """Открыть детали проекта с расширенными опциями."""
-    project_id_str = callback.data.replace("proj_details_", "")
-    
-    if not project_id_str.isdigit():
-        await callback.answer("❌ Ошибка обработки ID", show_alert=True)
-        return
-    
-    project_id = int(project_id_str)
-    session = get_db_session()
-    
-    try:
-        report = crud.get_project_report(session, project_id)
-        
-        if report:
-            await callback.message.edit_text(
-                format_project_report(report),
-                reply_markup=project_details_kb(project_id),
-                parse_mode="HTML"
-            )
-        else:
-            await callback.answer("❌ Проект не найден", show_alert=True)
-    except Exception as exc:
-        logger.exception(f"Ошибка при загрузке деталей: {exc}")
-        await callback.answer("❌ Ошибка при загрузке", show_alert=True)
     finally:
         session.close()
     
@@ -906,7 +983,7 @@ async def cb_history_expenses(callback: CallbackQuery, state: FSMContext) -> Non
 
 @router.callback_query(F.data.startswith("gallery_"))
 async def cb_gallery(callback: CallbackQuery, state: FSMContext) -> None:
-    """Открыть галерею фото проекта."""
+    """Открыть галерею фото проекта по этапам."""
     project_id_str = callback.data.replace("gallery_", "")
     
     if not project_id_str.isdigit():
@@ -920,46 +997,292 @@ async def cb_gallery(callback: CallbackQuery, state: FSMContext) -> None:
         photos = crud.get_all_project_photos(session, project_id)
         
         if not photos:
-            await callback.message.edit_text(
-                "📭 Галерея пуста. Загрузите фотографии.",
-                reply_markup=back_to_menu_kb()
+            await callback.message.answer(
+                "📭 <b>Галерея пуста</b>\n\n"
+                "Загрузите фотографии проекта через меню 'Фото отчёт'.",
+                reply_markup=back_to_menu_kb(),
+                parse_mode="HTML"
             )
             await callback.answer()
             return
         
-        # Показываем первое фото
-        photo = photos[0]
+        # Группируем фото по этапам
+        stages_dict = {
+            "draft": [],
+            "electric": [],
+            "finish": [],
+        }
+        
+        for photo in photos:
+            stage_key = photo.stage.value
+            if stage_key in stages_dict:
+                stages_dict[stage_key].append(photo)
+        
+        # Сохраняем информацию о галерее в состояние
         await state.update_data(
             gallery_project_id=project_id,
-            gallery_index=0,
-            gallery_photos=[p.photo_id for p in photos]
+            gallery_stages_dict={
+                "draft": [(p.photo_id, p.created_at) for p in stages_dict["draft"]],
+                "electric": [(p.photo_id, p.created_at) for p in stages_dict["electric"]],
+                "finish": [(p.photo_id, p.created_at) for p in stages_dict["finish"]],
+            },
         )
         
-        caption = (
-            f"📸 <b>Фото 1 из {len(photos)}</b>\n"
-            f"Этап: {format_project_stage(photo.stage.value)}\n"
-            f"Дата: {format_datetime(photo.created_at)}"
-        )
+        # Создаём текст со статистикой
+        text = "📷 <b>Галерея фотографий по этапам</b>\n\n"
+        text += f"📋 Эскиз: {len(stages_dict['draft'])} фото\n"
+        text += f"⚡ Электрика: {len(stages_dict['electric'])} фото\n"
+        text += f"🎨 Отделка: {len(stages_dict['finish'])} фото\n\n"
+        text += "Выберите этап для просмотра:"
         
-        await callback.message.edit_media(
-            media=None  # Will be replaced below
-        )
-        await callback.message.answer_photo(
-            photo=photo.photo_id,
-            caption=caption,
+        # Создаём клавиатуру для выбора этапа
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        keyboard = [
+            [InlineKeyboardButton(
+                text=f"📋 Эскиз ({len(stages_dict['draft'])})",
+                callback_data=f"view_stage_draft_{project_id}"
+            )] if len(stages_dict['draft']) > 0 else None,
+            [InlineKeyboardButton(
+                text=f"⚡ Электрика ({len(stages_dict['electric'])})",
+                callback_data=f"view_stage_electric_{project_id}"
+            )] if len(stages_dict['electric']) > 0 else None,
+            [InlineKeyboardButton(
+                text=f"🎨 Отделка ({len(stages_dict['finish'])})",
+                callback_data=f"view_stage_finish_{project_id}"
+            )] if len(stages_dict['finish']) > 0 else None,
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
+        ]
+        
+        # Удаляем None элементы
+        keyboard = [k for k in keyboard if k is not None]
+        
+        await callback.message.answer(
+            text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
             parse_mode="HTML"
         )
         
-        await callback.message.edit_text(
-            f"📷 Галерея ({len(photos)} фото)",
-            reply_markup=back_to_menu_kb()
-        )
     except Exception as exc:
         logger.exception(f"Ошибка при открытии галереи: {exc}")
         await callback.answer("❌ Ошибка при открытии галереи", show_alert=True)
     finally:
         session.close()
     
+    await callback.answer()
+
+
+# ============ ПРОСМОТР ФОТО ПО ЭТАПАМ ============
+
+@router.callback_query(F.data.startswith("view_stage_"))
+async def cb_view_stage_photos(callback: CallbackQuery, state: FSMContext) -> None:
+    """Показать фото конкретного этапа."""
+    # Парсим: view_stage_draft_5
+    parts = callback.data.split("_")
+    stage = parts[2]  # draft, electric, finish
+    project_id = int(parts[3])
+    
+    data = await state.get_data()
+    gallery_stages = data.get("gallery_stages_dict", {})
+    stage_photos = gallery_stages.get(stage, [])
+    
+    if not stage_photos:
+        await callback.answer("❌ Нет фото для этого этапа", show_alert=True)
+        return
+    
+    # Показываем первое фото этапа
+    photo_id, created_at = stage_photos[0]
+    
+    stage_names = {
+        "draft": "📋 Эскиз",
+        "electric": "⚡ Электрика",
+        "finish": "🎨 Отделка",
+    }
+    
+    caption = (
+        f"<b>{stage_names.get(stage, stage)}</b>\n"
+        f"📸 Фото 1 из {len(stage_photos)}\n"
+        f"📅 {format_date(created_at)}"
+    )
+    
+    await state.update_data(
+        gallery_current_stage=stage,
+        gallery_current_index=0,
+        gallery_current_photos=[p[0] for p in stage_photos]
+    )
+    
+    # Создаём клавиатуру для навигации
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    keyboard = []
+    
+    if len(stage_photos) > 1:
+        keyboard.append([
+            InlineKeyboardButton(text="◀️ Пред", callback_data=f"photo_prev_{stage}_{project_id}"),
+            InlineKeyboardButton(text=f"1/{len(stage_photos)}", callback_data="noop"),
+            InlineKeyboardButton(text="Сл. ▶️", callback_data=f"photo_next_{stage}_{project_id}"),
+        ])
+    
+    keyboard.append([InlineKeyboardButton(text="🔙 К этапам", callback_data=f"back_to_stages_{project_id}")])
+    
+    await callback.message.answer_photo(
+        photo=photo_id,
+        caption=caption,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("photo_prev_"))
+async def cb_photo_prev(callback: CallbackQuery, state: FSMContext) -> None:
+    """Показать предыдущее фото."""
+    # Парсим: photo_prev_draft_5
+    parts = callback.data.split("_")
+    stage = parts[2]
+    project_id = int(parts[3])
+    
+    data = await state.get_data()
+    current_index = data.get("gallery_current_index", 0)
+    current_photos = data.get("gallery_current_photos", [])
+    
+    if current_index > 0:
+        current_index -= 1
+        await state.update_data(gallery_current_index=current_index)
+        
+        photo_id = current_photos[current_index]
+        
+        stage_names = {
+            "draft": "📋 Эскиз",
+            "electric": "⚡ Электрика",
+            "finish": "🎨 Отделка",
+        }
+        
+        caption = (
+            f"<b>{stage_names.get(stage, stage)}</b>\n"
+            f"📸 Фото {current_index + 1} из {len(current_photos)}"
+        )
+        
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        keyboard = [
+            [
+                InlineKeyboardButton(text="◀️ Пред", callback_data=f"photo_prev_{stage}_{project_id}"),
+                InlineKeyboardButton(text=f"{current_index + 1}/{len(current_photos)}", callback_data="noop"),
+                InlineKeyboardButton(text="Сл. ▶️", callback_data=f"photo_next_{stage}_{project_id}"),
+            ],
+            [InlineKeyboardButton(text="🔙 К этапам", callback_data=f"back_to_stages_{project_id}")],
+        ]
+        
+        await callback.message.answer_photo(
+            photo=photo_id,
+            caption=caption,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+        )
+    
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("photo_next_"))
+async def cb_photo_next(callback: CallbackQuery, state: FSMContext) -> None:
+    """Показать следующее фото."""
+    # Парсим: photo_next_draft_5
+    parts = callback.data.split("_")
+    stage = parts[2]
+    project_id = int(parts[3])
+    
+    data = await state.get_data()
+    current_index = data.get("gallery_current_index", 0)
+    current_photos = data.get("gallery_current_photos", [])
+    
+    if current_index < len(current_photos) - 1:
+        current_index += 1
+        await state.update_data(gallery_current_index=current_index)
+        
+        photo_id = current_photos[current_index]
+        
+        stage_names = {
+            "draft": "📋 Эскиз",
+            "electric": "⚡ Электрика",
+            "finish": "🎨 Отделка",
+        }
+        
+        caption = (
+            f"<b>{stage_names.get(stage, stage)}</b>\n"
+            f"📸 Фото {current_index + 1} из {len(current_photos)}"
+        )
+        
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        keyboard = [
+            [
+                InlineKeyboardButton(text="◀️ Пред", callback_data=f"photo_prev_{stage}_{project_id}"),
+                InlineKeyboardButton(text=f"{current_index + 1}/{len(current_photos)}", callback_data="noop"),
+                InlineKeyboardButton(text="Сл. ▶️", callback_data=f"photo_next_{stage}_{project_id}"),
+            ],
+            [InlineKeyboardButton(text="🔙 К этапам", callback_data=f"back_to_stages_{project_id}")],
+        ]
+        
+        await callback.message.answer_photo(
+            photo=photo_id,
+            caption=caption,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+        )
+    
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("back_to_stages_"))
+async def cb_back_to_stages(callback: CallbackQuery, state: FSMContext) -> None:
+    """Вернуться к меню выбора этапов."""
+    project_id_str = callback.data.replace("back_to_stages_", "")
+    
+    if not project_id_str.isdigit():
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+    
+    project_id = int(project_id_str)
+    
+    data = await state.get_data()
+    gallery_stages = data.get("gallery_stages_dict", {})
+    
+    # Создаём текст со статистикой
+    text = "📷 <b>Галерея фотографий по этапам</b>\n\n"
+    text += f"📋 Эскиз: {len(gallery_stages.get('draft', []))} фото\n"
+    text += f"⚡ Электрика: {len(gallery_stages.get('electric', []))} фото\n"
+    text += f"🎨 Отделка: {len(gallery_stages.get('finish', []))} фото\n\n"
+    text += "Выберите этап для просмотра:"
+    
+    # Создаём клавиатуру для выбора этапа
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    keyboard = [
+        [InlineKeyboardButton(
+            text=f"📋 Эскиз ({len(gallery_stages.get('draft', []))})",
+            callback_data=f"view_stage_draft_{project_id}"
+        )] if len(gallery_stages.get('draft', [])) > 0 else None,
+        [InlineKeyboardButton(
+            text=f"⚡ Электрика ({len(gallery_stages.get('electric', []))})",
+            callback_data=f"view_stage_electric_{project_id}"
+        )] if len(gallery_stages.get('electric', [])) > 0 else None,
+        [InlineKeyboardButton(
+            text=f"🎨 Отделка ({len(gallery_stages.get('finish', []))})",
+            callback_data=f"view_stage_finish_{project_id}"
+        )] if len(gallery_stages.get('finish', [])) > 0 else None,
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
+    ]
+    
+    # Удаляем None элементы
+    keyboard = [k for k in keyboard if k is not None]
+    
+    await callback.message.answer(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "noop")
+async def cb_noop(callback: CallbackQuery) -> None:
+    """Обработчик для неактивных кнопок."""
     await callback.answer()
 
 

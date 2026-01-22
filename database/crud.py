@@ -68,6 +68,11 @@ def get_projects_by_user(session: Session, user_id: int) -> list[Project]:
     return session.query(Project).filter(Project.owner_id == user_id).all()
 
 
+def get_user_projects(session: Session, user_id: int) -> list[Project]:
+    """Получить все проекты пользователя (алиас для get_projects_by_user)."""
+    return get_projects_by_user(session, user_id)
+
+
 def create_project(
     session: Session,
     name: str,
@@ -127,6 +132,7 @@ def create_transaction(
     category: TransactionCategory,
     description: str | None = None,
     photo_url: str | None = None,
+    created_by_id: int | None = None,
 ) -> Transaction:
     """Создать новую операцию расходов."""
     transaction = Transaction(
@@ -135,6 +141,7 @@ def create_transaction(
         category=category,
         description=description,
         photo_url=photo_url,
+        created_by_id=created_by_id,
     )
     session.add(transaction)
     session.commit()
@@ -280,35 +287,6 @@ def update_project_budget(session: Session, project_id: int, new_budget: float) 
     except Exception:
         session.rollback()
         return False
-
-
-def get_daily_expenses(session: Session, project_id: int) -> dict:
-    """Получить расходы по дням в формате ГГГГ-ММ-ДД: сумма."""
-    transactions = get_project_transactions(session, project_id)
-    
-    daily = {}
-    for t in transactions:
-        date_key = t.created_at.strftime("%d.%m.%Y")
-        daily[date_key] = daily.get(date_key, 0) + float(t.amount)
-    
-    return daily
-
-
-def get_budget_by_category(session: Session, project_id: int) -> dict:
-    """Получить распределение бюджета по категориям."""
-    transactions = get_project_transactions(session, project_id)
-    
-    categories = {
-        "materials": 0,
-        "labor": 0,
-        "other": 0,
-    }
-    
-    for t in transactions:
-        category_key = t.category.value
-        categories[category_key] = categories.get(category_key, 0) + float(t.amount)
-    
-    return categories
 
 
 # ============ CHANGE ORDER CRUD ============

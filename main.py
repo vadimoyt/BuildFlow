@@ -36,3 +36,13 @@ async def main() -> None:
     dp.include_router(base_router)
     dp.include_router(tasks_approvals_router)
     dp.include_router(voice_input_router)
+    logger.info("Bot started!")
+    
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
